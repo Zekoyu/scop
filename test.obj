@@ -1,0 +1,11 @@
+# List of geometric vertices, with (x, y, z, [w]) coordinates, w is optional and defaults to 1.0.
+v 0.123 0.234 0.345 1.0
+
+# List of texture coordinates, in (u, [v, w]) coordinates, these will vary between 0 and 1. v, w are optional and default to 0.
+vt 0.500 1 0
+
+# List of vertex normals in (x,y,z) form; normals might not be unit vectors.
+vn 0.707 0.000 0.707
+
+# Parameter space vertices in (u, [v, w]) form; free form geometry statement (see below)
+vp 0.310000 3.210000 2.100000
