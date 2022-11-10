@@ -1,4 +1,8 @@
 #include <GLFW/glfw3.h>
+#include <OpenGL/gl.h>
+#include <glm/glm.hpp>
+#include <glm/gtx/transform.hpp>
+
 #include <stdlib.h>
 #include <iostream>
 #include <vector>
@@ -7,21 +11,6 @@
 #include <sstream>
 #include <optional>
 
-// Displays a window with a square inside.
-
-void display(void)
-{
-	glClear(GL_COLOR_BUFFER_BIT);
-
-	glBegin(GL_POLYGON);
-		glVertex3f(0.0, 0.0, 0.0);
-		glVertex3f(0.5, 0.0, 0.0);
-		glVertex3f(0.5, 0.5, 0.0);
-		glVertex3f(0.0, 0.5, 0.0);
-	glEnd();
-
-	glFlush();
-}
 
 struct FileNotFoundException : public std::exception
 {
@@ -238,7 +227,7 @@ ObjFace parseFace(const std::string &line)
 // http://paulbourke.net/dataformats/obj/
 class ObjectFile
 {
-    private:
+    public:
         std::string _filename;
 
         std::vector<ObjVertex> _vertices;
@@ -334,6 +323,42 @@ void usage()
     std::cerr << "fuck you and use a file.obj" << std::endl;
 }
 
+// function to rotate a given vertex about the origin by a given angle in degrees
+glm::vec3 rotateVertex(glm::vec3 vertex, float angleX, float angleY, float angleZ)
+{
+    glm::mat4 rotationMatrix = glm::mat4(1.0f);
+    rotationMatrix = glm::rotate(rotationMatrix, glm::radians(angleX), glm::vec3(1.0f, 0.0f, 0.0f));
+    rotationMatrix = glm::rotate(rotationMatrix, glm::radians(angleY), glm::vec3(0.0f, 1.0f, 0.0f));
+    rotationMatrix = glm::rotate(rotationMatrix, glm::radians(angleZ), glm::vec3(0.0f, 0.0f, 1.0f));
+
+    glm::vec4 rotatedVertex = rotationMatrix * glm::vec4(vertex, 1.0f);
+    return glm::vec3(rotatedVertex);
+}
+
+void displayObject(ObjectFile &obj)
+{
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    for (auto &face: obj._faces)
+    {
+        glBegin(GL_POLYGON);
+        for (auto &objVertex: face.vertices)
+        {
+            // if (vertex.normalIndex.has_value())
+            //     glNormal3f(obj._normals.at(vertex.normalIndex.value()).x, obj._normals.at(vertex.normalIndex.value()).y, obj._normals.at(vertex.normalIndex.value()).z);
+            // if (vertex.textureCoordinateIndex.has_value())
+            //     glTexCoord2f(obj._texcoords.at(vertex.textureCoordinateIndex.value()).u, obj._texcoords.at(vertex.textureCoordinateIndex.value()).v);
+
+            glm::vec3 vertex = glm::vec3(obj._vertices.at(objVertex.vertexIndex).x, obj._vertices.at(objVertex.vertexIndex).y, obj._vertices.at(objVertex.vertexIndex).z);
+            vertex = rotateVertex(vertex, 45, 30, 45);
+            glVertex3f(vertex.x, vertex.y, vertex.z);
+            // glVertex3f(obj._vertices.at(vertex.vertexIndex).x, obj._vertices.at(vertex.vertexIndex).y, obj._vertices.at(vertex.vertexIndex).z);
+        }
+        glEnd();
+
+        glFlush();
+    }
+}
+
 int main(int argc, char** argv)
 {
     if (argc != 2)
@@ -351,8 +376,10 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+    std::unique_ptr<ObjectFile> obj;
+
     try {
-        ObjectFile obj(filename.c_str());
+        obj = std::make_unique<ObjectFile>(filename.c_str());
     } catch (std::exception &e) {
         std::cerr << "Cannot parse file " << filename << ": " << e.what() << std::endl;
         return EXIT_FAILURE;
@@ -363,7 +390,7 @@ int main(int argc, char** argv)
     if (!glfwInit())
         return -1;
 
-    window = glfwCreateWindow(640, 480, "Hello World", NULL, NULL);
+    window = glfwCreateWindow(640, 640, "Hello World", NULL, NULL);
     if (!window)
     {
         glfwTerminate();
@@ -374,7 +401,7 @@ int main(int argc, char** argv)
 
     while (!glfwWindowShouldClose(window))
     {
-        display();
+        displayObject(*obj);
         glfwSwapBuffers(window);
 
         glfwPollEvents();
