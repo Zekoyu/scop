@@ -337,19 +337,38 @@ glm::vec3 rotateVertex(glm::vec3 vertex, float angleX, float angleY, float angle
 
 void displayObject(ObjectFile &obj)
 {
+    std::vector<glm::vec3> faceColors;
+
+    for (size_t i = 0; i < obj._faces.size(); i++)
+    {
+        // create color based on index so that faces have different color but always the same color for the same face
+        float r = (i * 0.1f);
+        while (r > 1.0f)
+            r -= 1.0f;
+        float g = (i * 0.2f);
+        while (g > 1.0f)
+            g -= 1.0f;
+        float b = (i * 0.3f);
+        while (b > 1.0f)
+            b -= 1.0f;
+        faceColors.push_back(glm::vec3(r, g, b));
+    }
+
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
     for (auto &face: obj._faces)
     {
         glBegin(GL_POLYGON);
         for (auto &objVertex: face.vertices)
         {
+            glColor3f(faceColors[&face - &obj._faces[0]].x, faceColors[&face - &obj._faces[0]].y, faceColors[&face - &obj._faces[0]].z);
             // if (vertex.normalIndex.has_value())
             //     glNormal3f(obj._normals.at(vertex.normalIndex.value()).x, obj._normals.at(vertex.normalIndex.value()).y, obj._normals.at(vertex.normalIndex.value()).z);
             // if (vertex.textureCoordinateIndex.has_value())
             //     glTexCoord2f(obj._texcoords.at(vertex.textureCoordinateIndex.value()).u, obj._texcoords.at(vertex.textureCoordinateIndex.value()).v);
 
             glm::vec3 vertex = glm::vec3(obj._vertices.at(objVertex.vertexIndex).x, obj._vertices.at(objVertex.vertexIndex).y, obj._vertices.at(objVertex.vertexIndex).z);
-            vertex = rotateVertex(vertex, 45, 30, 45);
+            vertex = rotateVertex(vertex, 45, 45, 45);
             glVertex3f(vertex.x, vertex.y, vertex.z);
             // glVertex3f(obj._vertices.at(vertex.vertexIndex).x, obj._vertices.at(vertex.vertexIndex).y, obj._vertices.at(vertex.vertexIndex).z);
         }
@@ -385,10 +404,12 @@ int main(int argc, char** argv)
         return EXIT_FAILURE;
     }
 
+
     // create window using glfw
     GLFWwindow* window;
     if (!glfwInit())
         return -1;
+
 
     window = glfwCreateWindow(640, 640, "Hello World", NULL, NULL);
     if (!window)
@@ -398,11 +419,17 @@ int main(int argc, char** argv)
     }
 
     glfwMakeContextCurrent(window);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
 
     while (!glfwWindowShouldClose(window))
     {
         displayObject(*obj);
         glfwSwapBuffers(window);
+
+        // close on ESC press
+        if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, true);
 
         glfwPollEvents();
     }
