@@ -5,6 +5,7 @@
 #include <exception>
 #include <fstream>
 #include <sstream>
+#include <optional>
 
 // Displays a window with a square inside.
 
@@ -72,17 +73,23 @@ struct ObjParameterSpaceVertex
 // f
 struct ObjFace
 {
-    std::vector<int> vertexIndices;
-    std::vector<int> textureCoordinateIndices;
-    std::vector<int> normalIndices;
+    struct Vertex
+    {
+        int vertexIndex;
+        std::optional<int> textureCoordinateIndex;
+        std::optional<int> normalIndex;
+    };
+
+    std::vector<Vertex> vertices;
 };
 
 // l
 struct ObjLine
 {
-    std::vector<int> vertexIndices;
+    std::vector<std::size_t> vertexIndices;
 };
 
+// split("a/b/c//d", '/') -> {"a", "b", "c", "", "d"}
 std::vector<std::string> split(const std::string& s, char delimiter)
 {
     std::vector<std::string> tokens;
@@ -93,9 +100,21 @@ std::vector<std::string> split(const std::string& s, char delimiter)
     return tokens;
 }
 
+// split_without_empty("a/b/c//d", '/') -> {"a", "b", "c", "d"}
+std::vector<std::string> split_without_empty(const std::string& s, char delimiter)
+{
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream tokenStream(s);
+    while (std::getline(tokenStream, token, delimiter))
+        if (!token.empty())
+            tokens.push_back(token);
+    return tokens;
+}
+
 ObjVertex parseVertex(const std::string &line)
 {
-    auto tokens = split(line, ' ');
+    auto tokens = split_without_empty(line, ' ');
 
     if (tokens.size() < 4 || tokens.size() > 5 || tokens.at(0) != "v")
         throw InvalidObjFileException("Invalid vertex line: " + line);
@@ -117,7 +136,7 @@ ObjVertex parseVertex(const std::string &line)
 
 ObjTextureCoordinate parseTextureCoordinate(const std::string &line)
 {
-    auto tokens = split(line, ' ');
+    auto tokens = split_without_empty(line, ' ');
 
     if (tokens.size() < 2 || tokens.size() > 4 || tokens.at(0) != "vt")
         throw InvalidObjFileException("Invalid texture coordinate line: " + line);
@@ -139,7 +158,7 @@ ObjTextureCoordinate parseTextureCoordinate(const std::string &line)
 
 ObjNormal parseNormal(const std::string &line)
 {
-    auto tokens = split(line, ' ');
+    auto tokens = split_without_empty(line, ' ');
 
     if (tokens.size() != 4 || tokens.at(0) != "vn")
         throw InvalidObjFileException("Invalid normal line: " + line);
@@ -159,7 +178,7 @@ ObjNormal parseNormal(const std::string &line)
 
 ObjParameterSpaceVertex parseParameterSpaceVertex(const std::string &line)
 {
-    auto tokens = split(line, ' ');
+    auto tokens = split_without_empty(line, ' ');
 
     if (tokens.size() < 2 || tokens.size() > 4 || tokens.at(0) != "vp")
         throw InvalidObjFileException("Invalid parameter space vertex line: " + line);
@@ -179,8 +198,44 @@ ObjParameterSpaceVertex parseParameterSpaceVertex(const std::string &line)
     return parameterSpaceVertex;
 }
 
+ObjFace parseFace(const std::string &line)
+{
+    auto tokens = split_without_empty(line, ' ');
+
+    if (tokens.size() < 4 || tokens.at(0) != "f")
+        throw InvalidObjFileException("Invalid face line: " + line);
+
+    ObjFace face;
+    try
+    {
+        for (int i = 1; i < tokens.size(); i++)
+        {
+            auto subtokens = split(tokens.at(i), '/');
+            if (subtokens.size() < 1 || subtokens.size() > 3)
+                throw InvalidObjFileException("Invalid face line: " + line);
+
+            ObjFace::Vertex vertex;
+            vertex.vertexIndex = std::stoi(subtokens.at(0));
+            // vertex normal without texture coordinate is f v1//vn1
+            if (subtokens.size() >= 2 && subtokens.at(1) != "")
+                vertex.textureCoordinateIndex = std::stoi(subtokens.at(1));
+            if (subtokens.size() >= 3)
+                vertex.normalIndex = std::stoi(subtokens.at(2));
+
+            face.vertices.push_back(vertex);
+        }
+    }
+    catch (std::invalid_argument &e)
+    {
+        throw InvalidObjFileException("Invalid face line (invalid values): " + line);
+    }
+
+    return face;
+}
+
 // https://www.cs.cmu.edu/~mbz/personal/graphics/obj.html
 // https://en.wikipedia.org/wiki/Wavefront_.obj_file#File_format
+// http://paulbourke.net/dataformats/obj/
 class ObjectFile
 {
     private:
@@ -193,9 +248,9 @@ class ObjectFile
         std::vector<ObjFace> _faces;
         std::vector<ObjLine> _lines;
 
-        size_t _verticesCount = 1;
-        size_t _texcoordsCount = 1;
-        size_t _normalsCount = 1;
+        size_t _verticesCount = 0;
+        size_t _texcoordsCount = 0;
+        size_t _normalsCount = 0;
 
     public:
         ObjectFile(const char* filename): _filename(filename)
@@ -212,7 +267,7 @@ class ObjectFile
             {
                 lineNum++;
 
-                if (line.size() == 0)
+                if (line.size() == 0 || line.at(0) == '#')
                     continue;
 
                 if (line.size() < 2)
@@ -231,16 +286,45 @@ class ObjectFile
                 } else if (identifier == "vp") {
                     _paramSpaceVertices.push_back(parseParameterSpaceVertex(line));
                 }  else if (identifier == "f ") {
-                    _faces.push_back(parseFace(line));
+                    ObjFace face = parseFace(line);
+
+
+                    // Converts index to 0-based indexes + if negative it means it's relative to the end of the array (eg. -1 is the last element)
+                    for (auto &vertex: face.vertices)
+                    {
+                        if (vertex.vertexIndex < 0)
+                            vertex.vertexIndex = _verticesCount + vertex.vertexIndex;
+                        else
+                            vertex.vertexIndex--;
+
+                        if (vertex.textureCoordinateIndex.has_value() && vertex.textureCoordinateIndex.value() < 0)
+                            vertex.textureCoordinateIndex = _texcoordsCount + vertex.textureCoordinateIndex.value();
+                        else if (vertex.textureCoordinateIndex.has_value())
+                            vertex.textureCoordinateIndex.value()--;
+
+                        if (vertex.normalIndex.has_value() && vertex.normalIndex.value() < 0)
+                            vertex.normalIndex = _normalsCount + vertex.normalIndex.value();
+                        else if (vertex.normalIndex.has_value())
+                            vertex.normalIndex.value()--;
+
+                        if (vertex.vertexIndex < 0 || vertex.vertexIndex >= _verticesCount)
+                            throw InvalidObjFileException("line " + std::to_string(lineNum) + " is invalid (vertex index out of bounds)");
+                        else if (vertex.textureCoordinateIndex.has_value() && (vertex.textureCoordinateIndex.value() < 0 || vertex.textureCoordinateIndex.value() >= _texcoordsCount))
+                            throw InvalidObjFileException("line " + std::to_string(lineNum) + " is invalid (texture coordinate index out of bounds)");
+                        else if (vertex.normalIndex.has_value() && (vertex.normalIndex.value() < 0 || vertex.normalIndex.value() >= _normalsCount))
+                            throw InvalidObjFileException("line " + std::to_string(lineNum) + " is invalid (normal index out of bounds)");
+                    }
+
+                    _faces.push_back(face);
                 } /* else if (identifier == "l ") {
                     _lines.push_back(parseLine(line));
-                } */ else if (identifier.at(0) != '#') {
+                } */ else {
                     throw InvalidObjFileException("unknown token " + identifier + " on line " + std::to_string(lineNum));
                 }
 
             }
 
-
+            std::cout << "Successfully loaded and parsed " << filename << std::endl;
         }
 };
 
