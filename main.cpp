@@ -10,7 +10,11 @@
 #include <fstream>
 #include <sstream>
 #include <optional>
+#include <chrono>
+#include <thread>
 
+
+#define TARGET_FPS 60
 
 struct FileNotFoundException : public std::exception
 {
@@ -99,6 +103,27 @@ std::vector<std::string> split_without_empty(const std::string& s, char delimite
         if (!token.empty())
             tokens.push_back(token);
     return tokens;
+}
+
+// Rotate a vertex around a given point
+glm::vec3 rotateVertex(const ObjVertex &vertex, const glm::vec3 &center, float angleX, float angleY, float angleZ)
+{
+    angleX = glm::radians(angleX);
+    angleY = glm::radians(angleY);
+    angleZ = glm::radians(angleZ);
+    
+    // change the origin to the center
+    glm::vec3 v = {vertex.x - center.x, vertex.y - center.y, vertex.z - center.z};
+
+    // rotate around x
+    glm::vec3 v2 = {v.x, v.y * cos(angleX) - v.z * sin(angleX), v.y * sin(angleX) + v.z * cos(angleX)};
+    // rotate around y
+    glm::vec3 v3 = {v2.x * cos(angleY) + v2.z * sin(angleY), v2.y, -v2.x * sin(angleY) + v2.z * cos(angleY)};
+    // rotate around z
+    glm::vec3 v4 = {v3.x * cos(angleZ) - v3.y * sin(angleZ), v3.x * sin(angleZ) + v3.y * cos(angleZ), v3.z};
+
+    // change the origin back
+    return {v4.x + center.x, v4.y + center.y, v4.z + center.z};
 }
 
 ObjVertex parseVertex(const std::string &line)
@@ -241,8 +266,18 @@ class ObjectFile
         size_t _texcoordsCount = 0;
         size_t _normalsCount = 0;
 
+        double _scale = 1.0;
+
     public:
+        ObjectFile() {}
+
         ObjectFile(const char* filename): _filename(filename)
+        {
+            load(filename);
+            normalize();
+        }
+
+        void load(const char* filename)
         {
             std::cout << "Loading " << filename << std::endl;
 
@@ -315,6 +350,133 @@ class ObjectFile
 
             std::cout << "Successfully loaded and parsed " << filename << std::endl;
         }
+
+        void display()
+        {
+            size_t currentFace = 0;
+            for (auto &face: _faces)
+            {
+                currentFace++;
+                
+                glBegin(GL_POLYGON);
+                for (auto &objVertex: face.vertices)
+                {
+                    float r = (currentFace * 0.1f);
+                    if (r > 1.0f)
+                        r -= (int)r;
+                    float g = (currentFace * 0.2f);
+                    if (g > 1.0f)
+                        g -= (int)g;
+                    float b = (currentFace * 0.3f);
+                    if (b > 1.0f)
+                        b -= (int)b;
+
+                    glColor3f(r, g, b);
+
+                    if (objVertex.normalIndex.has_value())
+                        glNormal3f(_normals.at(objVertex.normalIndex.value()).x, _normals.at(objVertex.normalIndex.value()).y, _normals.at(objVertex.normalIndex.value()).z);
+                    if (objVertex.textureCoordinateIndex.has_value())
+                        glTexCoord2f(_texcoords.at(objVertex.textureCoordinateIndex.value()).u, _texcoords.at(objVertex.textureCoordinateIndex.value()).v);
+
+                    glm::vec3 vertex = glm::vec3(_vertices.at(objVertex.vertexIndex).x, _vertices.at(objVertex.vertexIndex).y, _vertices.at(objVertex.vertexIndex).z);
+                    glVertex3f(vertex.x, vertex.y, vertex.z);
+                }
+                glEnd();
+
+            }
+            glFlush();
+        }
+
+        glm::vec3 getCenterPoint()
+        {
+            float x = 0.0f;
+            float y = 0.0f;
+            float z = 0.0f;
+
+            for (const auto &vertex: _vertices)
+            {
+                x += vertex.x;
+                y += vertex.y;
+                z += vertex.z;
+            }
+
+            return glm::vec3(x / _vertices.size(), y / _vertices.size(), z / _vertices.size());
+        }
+
+        void rotate(float angleXDeg, float angleYDeg, float angleZDeg)
+        {
+            glm::vec3 centerPoint = getCenterPoint();
+
+            for (auto &vertex: _vertices)
+            {
+                glm::vec3 rotatedVertex = rotateVertex(vertex, centerPoint, angleXDeg, angleYDeg, angleZDeg);
+                vertex.x = rotatedVertex.x;
+                vertex.y = rotatedVertex.y;
+                vertex.z = rotatedVertex.z;
+            }
+        }
+
+        void translate(float x, float y, float z)
+        {
+            for (auto &vertex: _vertices)
+            {
+                vertex.x += x;
+                vertex.y += y;
+                vertex.z += z;
+            }
+        }
+
+        void scale(float factor)
+        {
+            if (factor == 0.0f || _scale * factor < 0.01f || _scale * factor > 2.0f)
+                return;
+                
+            _scale *= factor;
+            glm::vec3 centerPoint = getCenterPoint();
+
+            for (auto &vertex: _vertices)
+            {
+                vertex.x = centerPoint.x + (vertex.x - centerPoint.x) * factor;
+                vertex.y = centerPoint.y + (vertex.y - centerPoint.y) * factor;
+                vertex.z = centerPoint.z + (vertex.z - centerPoint.z) * factor;
+            }
+        }
+
+        void center()
+        {
+            glm::vec3 centerPoint = getCenterPoint();
+
+            for (auto &vertex: _vertices)
+            {
+                vertex.x -= centerPoint.x;
+                vertex.y -= centerPoint.y;
+                vertex.z -= centerPoint.z;
+            }
+        }
+
+        // Make all vertices coordinates between -1 and 1
+        void normalize()
+        {
+            glm::vec3 centerPoint = getCenterPoint();
+
+            float max = 0.0f;
+            for (const auto &vertex: _vertices)
+            {
+                if (std::abs(vertex.x) > max)
+                    max = std::abs(vertex.x);
+                if (std::abs(vertex.y) > max)
+                    max = std::abs(vertex.y);
+                if (std::abs(vertex.z) > max)
+                    max = std::abs(vertex.z);
+            }
+
+            for (auto &vertex: _vertices)
+            {
+                vertex.x = (vertex.x - centerPoint.x) / max;
+                vertex.y = (vertex.y - centerPoint.y) / max;
+                vertex.z = (vertex.z - centerPoint.z) / max;
+            }
+        }
 };
 
 
@@ -323,86 +485,37 @@ void usage()
     std::cerr << "fuck you and use a file.obj" << std::endl;
 }
 
-// function to rotate a given vertex about the origin by a given angle in degrees
-glm::vec3 rotateVertex(glm::vec3 vertex, float angleX, float angleY, float angleZ)
-{
-    glm::mat4 rotationMatrix = glm::mat4(1.0f);
-    rotationMatrix = glm::rotate(rotationMatrix, glm::radians(angleX), glm::vec3(1.0f, 0.0f, 0.0f));
-    rotationMatrix = glm::rotate(rotationMatrix, glm::radians(angleY), glm::vec3(0.0f, 1.0f, 0.0f));
-    rotationMatrix = glm::rotate(rotationMatrix, glm::radians(angleZ), glm::vec3(0.0f, 0.0f, 1.0f));
-
-    glm::vec4 rotatedVertex = rotationMatrix * glm::vec4(vertex, 1.0f);
-    return glm::vec3(rotatedVertex);
-}
-
-void displayObject(ObjectFile &obj)
-{
-    std::vector<glm::vec3> faceColors;
-
-    for (size_t i = 0; i < obj._faces.size(); i++)
-    {
-        // create color based on index so that faces have different color but always the same color for the same face
-        float r = (i * 0.1f);
-        while (r > 1.0f)
-            r -= 1.0f;
-        float g = (i * 0.2f);
-        while (g > 1.0f)
-            g -= 1.0f;
-        float b = (i * 0.3f);
-        while (b > 1.0f)
-            b -= 1.0f;
-        faceColors.push_back(glm::vec3(r, g, b));
-    }
-
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
-    for (auto &face: obj._faces)
-    {
-        glBegin(GL_POLYGON);
-        for (auto &objVertex: face.vertices)
-        {
-            glColor3f(faceColors[&face - &obj._faces[0]].x, faceColors[&face - &obj._faces[0]].y, faceColors[&face - &obj._faces[0]].z);
-            // if (vertex.normalIndex.has_value())
-            //     glNormal3f(obj._normals.at(vertex.normalIndex.value()).x, obj._normals.at(vertex.normalIndex.value()).y, obj._normals.at(vertex.normalIndex.value()).z);
-            // if (vertex.textureCoordinateIndex.has_value())
-            //     glTexCoord2f(obj._texcoords.at(vertex.textureCoordinateIndex.value()).u, obj._texcoords.at(vertex.textureCoordinateIndex.value()).v);
-
-            glm::vec3 vertex = glm::vec3(obj._vertices.at(objVertex.vertexIndex).x, obj._vertices.at(objVertex.vertexIndex).y, obj._vertices.at(objVertex.vertexIndex).z);
-            vertex = rotateVertex(vertex, 45, 45, 45);
-            glVertex3f(vertex.x, vertex.y, vertex.z);
-            // glVertex3f(obj._vertices.at(vertex.vertexIndex).x, obj._vertices.at(vertex.vertexIndex).y, obj._vertices.at(vertex.vertexIndex).z);
-        }
-        glEnd();
-
-        glFlush();
-    }
-}
-
 int main(int argc, char** argv)
 {
-    if (argc != 2)
+    if (argc < 2)
     {
         usage();
         return EXIT_FAILURE;
     }
 
-    std::string filename = argv[1];
+    // std::unique_ptr<ObjectFile[]> objs = std::make_unique<ObjectFile[]>(argc);
+    ObjectFile** objs = new ObjectFile*[argc];
+    // objs[0] = NULL;
 
-    // check if .obj
-    if (filename.length() < 4 || filename.substr(filename.length() - 4) != ".obj")
+    for (int i = 1; i < argc; i++)
     {
-        usage();
-        return EXIT_FAILURE;
-    }
+        std::string filename = argv[i];
 
-    std::unique_ptr<ObjectFile> obj;
+        // check if .obj
+        if (filename.length() < 4 || filename.substr(filename.length() - 4) != ".obj")
+        {
+            usage();
+            return EXIT_FAILURE;
+        }
 
-    try {
-        obj = std::make_unique<ObjectFile>(filename.c_str());
-    } catch (std::exception &e) {
-        std::cerr << "Cannot parse file " << filename << ": " << e.what() << std::endl;
-        return EXIT_FAILURE;
+        try {
+            objs[i - 1] = new ObjectFile(filename.c_str());
+        } catch (std::exception &e) {
+            std::cerr << "Cannot parse file " << filename << ": " << e.what() << std::endl;
+            return EXIT_FAILURE;
+        }
     }
+    objs[argc - 1] = nullptr;
 
 
     // create window using glfw
@@ -420,11 +533,59 @@ int main(int argc, char** argv)
 
     glfwMakeContextCurrent(window);
     glEnable(GL_DEPTH_TEST);
+    
     glDepthFunc(GL_LESS);
+
+    glfwSetWindowUserPointer(window, objs);
+
+
+    // hide cursor
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+    // Capture obj to be able to use it in the callback
+    glfwSetCursorPosCallback(window, [](GLFWwindow* window, double xpos, double ypos) {
+        static double last_xpos = xpos;
+        static double last_ypos = ypos;
+
+        double y_offset = last_ypos - ypos;
+        double x_offset = xpos - last_xpos;
+
+        auto objs = static_cast<ObjectFile**>(glfwGetWindowUserPointer(window));
+        // idk why x axis is vertical and y axis is horizontal
+        for (size_t i = 0; objs[i] != nullptr; i++)
+        {
+            if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS)
+                objs[i]->translate(x_offset / 250.0, y_offset / 250.0, 0.0);
+            else if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS)
+                objs[i]->scale(1.0f + y_offset / 100.0);
+            else if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+                objs[i]->rotate(y_offset * 0.5, x_offset * 0.5, 0.0);
+        }
+        //     (objs[i])->rotate((y_offset) * 0.1f, (x_offset * 0.1f, 0.0f);
+
+        last_xpos = xpos;
+        last_ypos = ypos;
+    });
+
+    glfwSetScrollCallback(window, [](GLFWwindow* window, double xoffset, double yoffset)
+    {
+        double zoomFactor = 1.0f + (yoffset / 10.0f);
+
+        auto objs = static_cast<ObjectFile**>(glfwGetWindowUserPointer(window));
+        for (size_t i = 0; objs[i] != nullptr; i++)
+            objs[i]->scale(zoomFactor);
+    });
 
     while (!glfwWindowShouldClose(window))
     {
-        displayObject(*obj);
+        auto frame_start = std::chrono::high_resolution_clock::now();
+
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+
+        for (int i = 1; i < argc; i++)
+            (objs[i - 1])->display();
+
         glfwSwapBuffers(window);
 
         // close on ESC press
@@ -432,6 +593,50 @@ int main(int argc, char** argv)
             glfwSetWindowShouldClose(window, true);
 
         glfwPollEvents();
+
+        for (int i = 1; i < argc; i++)
+        {
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+                (objs[i - 1])->translate(0.0f, -0.025f, 0.0f);
+            
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+                (objs[i - 1])->translate(0.0f, 0.025f, 0.0f);
+            
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+                (objs[i - 1])->translate(0.025f, 0.0f, 0.0f);
+
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+                (objs[i - 1])->translate(-0.025f, 0.0f, 0.0f);
+
+            // rotate on keypress (in degrees)
+            if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+                (objs[i - 1])->rotate(1.5f, 0.0f, 0.0f);
+
+            if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+                (objs[i - 1])->rotate(-1.5f, 0.0f, 0.0f);
+
+            if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+                (objs[i - 1])->rotate(0.0f, 1.5f, 0.0f);
+
+            if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+                (objs[i - 1])->rotate(0.0f, -1.5f, 0.0f);
+
+            if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+                (objs[i - 1])->rotate(0.0f, 0.0f, 1.5f);
+
+            if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+                (objs[i - 1])->rotate(0.0f, 0.0f, -1.5f);
+
+            if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+                (objs[i - 1])->center();
+        }
+
+        auto frame_end = std::chrono::high_resolution_clock::now();
+
+        auto frame_duration = std::chrono::duration_cast<std::chrono::milliseconds>(frame_end - frame_start);
+
+        // std::cout << "Frame end: " << frame_duration.count() << "ms" << std::endl;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000 / TARGET_FPS) - frame_duration);
     }
 
 

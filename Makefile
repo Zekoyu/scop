@@ -1,5 +1,5 @@
 CC = g++
-CPPFLAGS = -O3 -std=c++17 -I$(HOME)/.brew/include -DGL_SILENCE_DEPRECATION # -Wall -Wextra -Werror
+CPPFLAGS = -std=c++17 -I$(HOME)/.brew/include -DGL_SILENCE_DEPRECATION -O3 # -g -fsanitize=address # -Wall -Wextra -Werror
 LDFLAGS = -lGLFW -framework OpenGL -L$(HOME)/.brew/lib
 
 NAME = scop
