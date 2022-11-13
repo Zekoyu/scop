@@ -371,7 +371,8 @@ class ObjectFile
                     if (b > 1.0f)
                         b -= (int)b;
 
-                    glColor3f(r, g, b);
+                    // glColor3f(r, g, b);
+                    glColor3f(0.8f, 0.3f, 0.4f);
 
                     if (objVertex.normalIndex.has_value())
                         glNormal3f(_normals.at(objVertex.normalIndex.value()).x, _normals.at(objVertex.normalIndex.value()).y, _normals.at(objVertex.normalIndex.value()).z);
@@ -533,7 +534,22 @@ int main(int argc, char** argv)
 
     glfwMakeContextCurrent(window);
     glEnable(GL_DEPTH_TEST);
+    // lightning
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_COLOR_MATERIAL);
+    glEnable(GL_NORMALIZE);
+    glShadeModel(GL_SMOOTH);
     
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 0.0f);
+    float specular = 0.0f;
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, &specular);
+    float ambient = 0.0f;
+    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, &ambient);
+    float diffuse = 0.0f;
+    glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, &diffuse);
+
+
     glDepthFunc(GL_LESS);
 
     glfwSetWindowUserPointer(window, objs);
@@ -584,7 +600,10 @@ int main(int argc, char** argv)
         glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 
         for (int i = 1; i < argc; i++)
+        {
             (objs[i - 1])->display();
+            (objs[i - 1])->rotate(0.0, 0.75, 0.0);
+        }
 
         glfwSwapBuffers(window);
 
